@@ -1,0 +1,527 @@
+---
+title: "Competition#43680"
+author: "Riley H. Tough"
+date: "2025-02-19"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+contact: toughr@myumanitoba.ca
+subtitle: "Leaders in Training Program - Data Science Stream (P3)"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## About
+Background
+
+Your team is approached by a government department that administers building inspections. You have been asked to do some analysis and modelling associated with this team’s work.
+
+For this test, you will use the Los Angeles building permit inspection dataset, available here:
+
+https://data.lacity.org/City-Infrastructure-Service-Requests/Building-and-Safety-Inspections/9w5z-rg2h/about_data
+
+https://data.lacity.org/City-Infrastructure-Service-Requests/Building-and-Safety-Permit-Information-Old/yv23-pmwf/data_preview
+
+You can use any other dataset on the LA or California Open Data Portals.
+
+
+```{r Library Control, message=FALSE, warning=FALSE}
+# Library Control
+cran_libraries = c("remotes","tidyverse", "data.table", "ggplot2", "dplyr", "stringr", "lubridate")
+#Function to check for and install
+install_missing_cran_packages <- function(packages) {
+missing_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(missing_packages)) {
+install.packages(missing_packages, dependencies = TRUE)
+}
+}
+install_missing_cran_packages(cran_libraries)
+# Load the required libraries
+lapply(cran_libraries, library, character.only = TRUE)
+
+# Create a snapshot to save R packages versions
+renv::snapshot()
+
+```
+
+## Data Preprocessing
+Regardless of the assignment, it is important to follow a similar process for the data.
+1) Load in the require data
+2) If necessary, create the final data set
+3) Remove unnecessary factors
+
+```{r Data Preprocessing, include=FALSE}
+##### Loading in the Data #####
+Inspections_20250218 = read.csv("~/Professional/Applications/Provincial/DataIntern/Assessment/Data/Building_and_Safety_Inspections_20250218.csv")
+Permit_Information_20250218 = read.csv("~/Professional/Applications/Provincial/DataIntern/Assessment/Data/Building_and_Safety_Permit_Information_Old_20250218.csv")
+
+#Visualize the columns
+colnames(Permit_Information_20250218)
+colnames(Inspections_20250218)
+# The column names contains "." where spaces would be. This makes it very annoying to visualize the data imo.
+
+colnames(Permit_Information_20250218) = gsub("\\.", "", colnames(Permit_Information_20250218))
+colnames(Inspections_20250218) = gsub("\\.", "", colnames(Inspections_20250218))
+
+# Modify the permit format to be "-" separated and merge Permit information with Inspection information
+Permit_Information_20250218$PCISPermit = gsub(" ", "-", Permit_Information_20250218$PCISPermit)
+CombinedDataset = merge(Permit_Information_20250218, by.x="PCISPermit", Inspections_20250218, by.y = "PERMIT")
+
+# The initial datasets are no longer necessary and are too big to keep in the environment
+rm(Inspections_20250218, Permit_Information_20250218)
+
+```
+
+## Data Preprocessing - Part 2
+There is a lot of information within CombinedDataset that is actually not necessary at all. These massive files take up a lot of space in the disk that can make further analysis difficult. Therefore, it is important to clean up these files early.
+
+### Selecting Relevant Columns
+Currently the CombinedDataset takes of 10GB of space. We need to subset this ASAP.
+
+Step 1: Go through questions 1-3 and begin to identify all the relevant columns necessary for addressing the questions
+Step 2: Filter out the CombinedDataset for these columns
+Note: It is better to include more than less
+
+```{r, include=FALSE}
+colnames(CombinedDataset)
+DataSubset = CombinedDataset %>%
+  dplyr::select(c("PCISPermit", "Block", "Status", "StatusDate","PermitType", "PermitSubType",
+                  "PermitCategory", "ProjectNumber", "InitiatingOffice", "IssueDate", "ZipCode", "Valuation",
+                  "LatitudeLongitude.x", # Information for Question 2
+                  "ContractorsBusinessName", "ContractorCity", "ContractorState", "LicenseExpirationDate",
+                  "ApplicantBusinessName", "ApplicantRelationship", #Information for Question 3
+                  "InspectionDate", "InspectionResult", "InspectionType", "LatitudeLongitude.y" # Inspections
+    ))
+
+rm(CombinedDataset) # Regenerate this file later if the subset is not sufficient
+
+```
+
+# Question One
+## Make a table and a visualization showing an interesting characteristic of the permit and inspection dataset.
+
+
+### Begin Work
+Relevant columns in the dataset:
+PCISPermit
+Block
+Status
+StatusDate
+PermitType
+PermitSubType
+PermitCategory
+ProjectNumber
+InitiatingOffice
+IssueDate
+PermitStatus
+Valulation
+InspectionDate
+InspectionResult
+
+What questions would be the most "interesting" for a city planner?
+Question One: What is the relationship between the number of permits being conducted and inspections? 
+
+```{r Q1}
+Q1_Data = DataSubset
+# Let's first investigate what each of these columns actually mean
+unique(Q1_Data$PermitType) # 17 Types of Permit
+unique(Q1_Data$PermitSubType) # 7 Types of Permit Subtype
+unique(Q1_Data$PermitCategory) # "Plan Check" or "No Plan Check"
+
+unique(Q1_Data$Status) # 19 Types of Permit Status (?)
+# Status of a permit, or of a permit application.
+
+# I am mostly interested in "trends" not a day-to-day activity
+
+Q1_Data <- Q1_Data %>%
+  dplyr::mutate(PermitStatusYear = year(mdy(StatusDate))) %>%
+  dplyr::mutate(InspectionYear = year(mdy(InspectionDate)))
+
+```
+### Permit Subtypes 
+Commercial, 1 or 2 Family Dwelling, Apartment, Onsite, Offsite, Public Safety Only, Special Equipment
+
+#### Question 1: After a permit is issued, how long does it take for an inspection?
+Necessary Data: IssueDate, InspectionDate
+
+How does this compare for between subtype? E.g. Commercial vs Public Safety?
+Additional Data: PermitSubtype
+
+```{r Q1_Cont}
+
+Q1A = DataSubset %>%
+  dplyr::select(c("IssueDate", "PermitType", "PermitSubType", "InspectionDate", "InspectionType")) %>%
+  dplyr::filter(!(InspectionDate == "")) %>% ## Turns out sometimes a permit was created but no inspection was ever made?
+  dplyr::filter(!(InspectionType == "")) %>%
+  dplyr::mutate(IssueDate = mdy(IssueDate)) %>%
+  dplyr::mutate(InspectionDate = mdy(InspectionDate))%>%
+  dplyr::mutate(DaysUntilInspection = as.numeric(InspectionDate - IssueDate))
+
+ggplot(Q1A, aes(x = reorder(as.factor(PermitSubType), -DaysUntilInspection, FUN = median), y = DaysUntilInspection))+
+  geom_boxplot()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+
+  labs(title = "Los Angeles Building Permits and Inspections 2013-2014", 
+       x = "Type of Permit",
+       y = "Time Until Inspection")
+
+```
+### Flagging for later
+Why are there a lot of Apartment permits that are based on inspections in the years prior?
+Also why does the dataset include permits from 2020 while the inspections were in 2013/2014? This seems suspicious. Flagging this for a conversation with the supervisor on what it means.
+
+```{r Q1_Cont2}
+## Resuming analysis
+Q1 = DataSubset %>%
+  dplyr::select(c("IssueDate", "PermitType", "PermitSubType", "InspectionDate", "InspectionType")) %>%
+  dplyr::filter(!(InspectionDate == "")) %>% ## Turns out sometimes a permit was created but no inspection was ever made?
+  dplyr::filter(!(InspectionType == "")) %>%
+  dplyr::mutate(IssueDate = mdy(IssueDate)) %>%
+  dplyr::mutate(InspectionDate = mdy(InspectionDate))%>%
+  dplyr::mutate(DaysUntilInspection = as.numeric(InspectionDate - IssueDate)) %>%
+  dplyr::filter(DaysUntilInspection > 0)
+
+ggplot(Q1, aes(x = reorder(as.factor(PermitSubType), -DaysUntilInspection, FUN = median), y = DaysUntilInspection))+
+  geom_boxplot()+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45, hjust=1))+
+  labs(title = "Los Angeles Building Permits and Inspections 2013-2014", 
+       x = "Type of Permit",
+       y = "Time Until Inspection")
+
+Q1_summary = Q1 %>%
+  dplyr::group_by(PermitSubType) %>%
+  dplyr::summarise(
+    AvgDays = mean(DaysUntilInspection, na.rm = TRUE),
+    MedianDays = median(DaysUntilInspection, na.rm = TRUE),
+    MinDays = min(DaysUntilInspection, na.rm = TRUE),
+    MaxDays = max(DaysUntilInspection, na.rm = TRUE))
+
+print(Q1_summary)
+
+# TODO: If time permits in the assessment, come back and run statistics on this
+
+```
+## Question 1 Responses ##
+When comparing the length of time between Permits being issued and when the inspections being conducted, the average amount of time for an inspection is longest for permits involving public safety and lowest for special equipment. 
+
+Through this, we also discovered that there are apartment permits being issued with back-dated inspections. Follow-up is necessary to determine what this means and why.
+
+## Question #2 ##
+Make a table and a visualization showing the results of inspections across geographies. In a sentence or two describe any patterns you observe.
+
+Relevant columns in the dataset: 
+InspectionDate
+InspectionResult
+InspectionType
+ZipCode
+LatitudeLongitude - This requires conversion
+
+# Question 2 #
+```{r Q2}
+# Cleaning up the workspace
+rm(Q1_Data, Q1, Q1_summary)
+
+# Convert the latitude and longitude
+Q2_Data = DataSubset
+Q2_Data$InspectionLatitude= gsub("\\(","", Q2_Data$LatitudeLongitude.y)
+Q2_Data$InspectionLatitude = as.numeric(gsub(",.*","", Q2_Data$InspectionLatitude))
+Q2_Data$InspectionLongitude = as.numeric(sub(".*,(.*)\\)", "\\1", Q2_Data$LatitudeLongitude.y))  
+
+length(Q2_Data %>%
+  filter(is.na(InspectionLatitude) | is.na(InspectionLongitude))
+) ## 19 permits that did not get an inspection?
+
+## Might as well tackle part 2 first...
+
+MissingInspections = Q2_Data %>%
+  dplyr::filter(InspectionResult == "") %>%
+  dplyr::group_by(PCISPermit)
+
+length(MissingInspections$PCISPermit) # 241075 values... but this may not be wierd?
+
+FullMissingInspections <- Q2_Data %>%
+  group_by(PCISPermit, StatusDate, IssueDate) %>%
+  filter(any(InspectionResult == "")) %>%  # Only the PCISPermit values with at least one empty InspectionResult
+  ungroup()
+
+## Not seeing any patterns off first glance in FullMissingInspections. If time remains, return to this result.
+
+#Clean up the environment for now
+rm(FullMissingInspections, MissingInspections)
+
+```
+
+### Thoughts
+The debate here is whether it is worth using a Bag of Words or Fuzzy model to characterize the types of Inspection Results. 
+
+The challenges are:
+1) These terms are highly technical (e.g. "OK for CoF", "OK to Expire Permit", "Off-Hour Fees Due") where their meaning isn't actually clear
+2) Using something like K-means clustering is more useful for the Types of inspection but this question is specifically asking for results
+
+Personally I don't understand what most of these terms even mean.
+
+I was able to find a list of codes available at https://www.permitla.org/ipars/permit_help.cfm and https://www.permitla.org/ipars/appl_help.cfm
+
+
+
+```{r Q2_Cont}
+# There is no need for the level of resolution in Q2 data. Let's make categories to observe trends.
+
+Q2_Data <- Q2_Data %>%
+  dplyr::filter(!(InspectionResult == "")) %>%
+  dplyr::mutate(InspectionResultCategory = case_when(
+    InspectionResult %in% c("Permit Finaled", "Completed", "Completed (special insp)", "Completed-MF (special insp)") ~ "Completed",
+    InspectionResult %in% c("Approved", "Conditional Approval", "OK to Issue CofO", "TCO Renewed", "OK for TCO", "OK for CofO", "Approved Pending GreenApproval", "No Violation (special insp)", "CofO Issued", "Not Required") ~ "In Compliance",
+    InspectionResult %in% c("Not Ready for Inspection", "CofO on Hold", "No Access for Inspection", "Corrections Issued", "Order to Comply Issued", "Violation Observed", "Permit Revoked", "CofO Revoked", "No Progress") ~ "Not Compliant",
+    InspectionResult %in% c("Partial Approval",  "Partial Inspection", "Insp Scheduled", "Pending Review", "Pending", "CofO Corrected", "CofO in Progress") ~ "In Progress",
+    InspectionResult %in% c("SGSOV Approved", "SGSOV Not Required", "SGSOV No Gas", "SGSOV Not Required") ~ "SGSOV In Compliance",
+    InspectionResult %in% c("SGSOV Gas Company", "SGSOV Letter Request") ~ "SGSOV In Progress",
+    InspectionResult %in% c("SGSOV Not Ready") ~ "SGSOV Not Compliant",
+    InspectionResult %in% c("Insp Cancelled", "Cancelled", "Off-Hour Fees Due") ~ "Inspection Cancelled",
+    InspectionResult %in% c("Permit Closed", "OK to Expire Permit", "Not Applicable", "Permit Expired", "Permit Withdrawn") ~ "Permit Ended",
+    InspectionResult %in% c("CofO Corrected-Status Void", "CofO Corrected-Status Void", "Permit Expired-Status Void", "Permit Finaled-Status Void", "CofO Issued-Status Void", "Permit Withdrawn-Status Void", "Permit Closed-Status Void") ~ "Voided Inspections")
+  ) # This actually didn't take long at all - was probably worth hard coding because of the definitions
+
+# What did I miss the first time?
+MissingResults = Q2_Data %>%
+  dplyr::filter(is.na(InspectionResultCategory)) # All Categorized
+
+# Let's start by looking at macro differences using ZipCodes
+Q2_Data_Summary = Q2_Data %>%
+  dplyr::group_by(ZipCode, InspectionResultCategory) %>%
+  dplyr::filter(!(ZipCode == "0")) %>%
+  dplyr::summarise(Count = n(), .groups = "drop") # Let's also note that some ZipCodes have a code of 0?
+
+ggplot(Q2_Data_Summary, aes(x = as.factor(ZipCode), y = Count, fill = InspectionResultCategory)) +
+  geom_bar(stat = "identity", position = "stack") +
+  theme_bw() +
+  labs(title = "Inspection Result Categories by Zip Code", 
+       x = "Zip Code", 
+       y = "Count", 
+       fill = "Inspection Result Category") +
+  theme(
+    axis.text.x = element_blank(),
+    axis.ticks.x  = element_blank()
+  ) # While the Zip Code Titles aren't present, they are ordered here just to get a "macro view"
+
+```
+
+```{r Q2_Cont2}
+
+## This was my first time plotting using Lattitude/Longitude and had to look up a guide for it
+# There's a reason stack overflow is the best!
+library(sf)
+
+## Let's look at those that only have violations
+DirectViolation = Q2_Data %>% 
+  dplyr::filter(InspectionResult == "Violation Observed")
+
+## Plotting Direct Violations
+# Are there any patterns that involve direct violations?
+ggplot(DirectViolation, aes(x = InspectionLongitude, y = InspectionLatitude, color = InspectionResult)) +
+  borders("state", region = "california") + 
+  geom_point(aes(color = as.factor(InspectionResult)), alpha = 1) +
+  scale_color_viridis_d() +
+  coord_cartesian(xlim = c(-118.7, -118.1), ylim = c(33.7, 34.4)) +  # The latitude/longitude of LA
+  labs(title = "Number of Inspection Violations in LA",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw()
+
+## Are there differences in by Inspection Type?
+ggplot(Q2_Data, aes(x = InspectionLongitude, y = InspectionLatitude, color = InspectionResultCategory)) +
+  borders("state", region = "california") + 
+  geom_point(aes(color = as.factor(InspectionResultCategory)), size = 0.2, alpha = 0.4) +
+  scale_color_viridis_d() +
+  coord_cartesian(xlim = c(-118.7, -118.1), ylim = c(33.7, 34.4)) +  # The latitude/longitude of LA
+  labs(title = "Geographical Distribution of Inspections in Los Angeles by Inspection Result",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw() +
+  facet_wrap(~ InspectionResultCategory, scales = "fixed")+
+  theme(
+    legend.position = "none"
+  ) # Not really any patterns standing out...
+
+## Inspections by Permit Type?
+ggplot(Q2_Data, aes(x = InspectionLongitude, y = InspectionLatitude, color = PermitType)) +
+  borders("state", region = "california") + 
+  geom_point(aes(color = as.factor(PermitType)), size = 0.2, alpha = 0.4) +
+  scale_color_viridis_d() +
+  coord_cartesian(xlim = c(-118.7, -118.1), ylim = c(33.7, 34.4)) +  # The latitude/longitude of LA
+  labs(title = "Geographical Distribution of Inspections in Los Angeles by Permit Type",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw() +
+  facet_wrap(~ PermitType, scales = "fixed")+
+  theme(
+    legend.position = "none"
+  ) ## Not really anything major?
+
+## Inspections by Permit Subtype?
+ggplot(Q2_Data, aes(x = InspectionLongitude, y = InspectionLatitude, color = PermitSubType)) +
+  borders("state", region = "california") + 
+  geom_point(aes(color = as.factor(PermitSubType)), size = 0.2, alpha = 0.4) +
+  scale_color_viridis_d() +
+  coord_cartesian(xlim = c(-118.7, -118.1), ylim = c(33.7, 34.4)) +  # The latitude/longitude of LA
+  labs(title = "Geographical Distribution of Inspections in Los Angeles by Permit Subtype",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw() +
+  facet_wrap(~ PermitSubType, scales = "fixed")+
+  theme(
+    legend.position = "none"
+  )
+
+ggplot(Q2_Data, aes(x = InspectionLongitude, y = InspectionLatitude, color = InitiatingOffice)) +
+  borders("state", region = "california") + 
+  geom_point(aes(color = as.factor(InitiatingOffice)), size = 0.2, alpha = 0.4) +
+  scale_color_viridis_d() +
+  coord_cartesian(xlim = c(-118.7, -118.1), ylim = c(33.7, 34.4)) +  # The latitude/longitude of LA
+  labs(title = "Geographical Distribution of Inspections in Los Angeles by the Initiating Office",
+       x = "Longitude",
+       y = "Latitude") +
+  theme_bw() +
+  facet_wrap(~ InitiatingOffice, scales = "fixed")+
+  theme(
+    legend.position = "none"
+  )
+
+```
+
+# Question 2 Answers
+## Make a table and a visualization showing the number of inspections by geography. In a sentence or two describe any patterns you observe.
+When inspecting the number of inspections based on geography, it mimics a map of population density but there are distinct gaps which correspond to the surrounding regions (e.g. Torrance on the Southern Point, Beverly Hills, Burbank, etc). Notably, when looking at Permit Subtype, I was expecting to see differences in "1 or 2 Family Dwelling", "Apartment", and "commercial" permits, but the significant overlap is probably due to the extreme density of the population; I wonder how different a graph of Winnipeg would be.
+
+## Were there any permits that did not get an inspection?
+Not only were there permits that had an inspection conducted years prior to approval (identified in Q1), there were also 241075 permits that have an inspection date but no recorded inspection result.
+
+# Question 3
+Your manager is convinced ‘out of town’ contractors are not as invested in the success of their projects and so are the main culprits when it comes to violations. You are asked to complete an analysis to test this hypothesis.
+
+Produce a model that quantifies the relationship between a contractor’s place of origin and their inspection outcome history. Investigate any other relevant factors as necessary.
+
+Interpret your results and produce a clear response for your manager.
+
+What are the relevant factors in question three?
+ContractorsBusinessName
+ContractorCity
+ContractorState
+LicenseExpirationDate
+ApplicantBusinessName
+ApplicantRelationship
+
+```{r Q3}
+## Let's start by cleaning up Question 2
+rm(Q2_Data, Q2_Data_Summary, Violations, DirectViolation)
+
+Q3_Data = DataSubset
+
+# Let's start by copying what we did for question 2...
+Q3_Data <- Q3_Data %>%
+  dplyr::filter(!(InspectionResult == "")) %>%
+  dplyr::mutate(InspectionResultCategory = case_when(
+    InspectionResult %in% c("Permit Finaled", "Completed", "Completed (special insp)", "Completed-MF (special insp)") ~ "Completed",
+    InspectionResult %in% c("Approved", "Conditional Approval", "OK to Issue CofO", "TCO Renewed", "OK for TCO", "OK for CofO", "Approved Pending GreenApproval", "No Violation (special insp)", "CofO Issued", "Not Required") ~ "In Compliance",
+    InspectionResult %in% c("Not Ready for Inspection", "CofO on Hold", "No Access for Inspection", "Corrections Issued", "Order to Comply Issued", "Violation Observed", "Permit Revoked", "CofO Revoked", "No Progress") ~ "Not Compliant",
+    InspectionResult %in% c("Partial Approval",  "Partial Inspection", "Insp Scheduled", "Pending Review", "Pending", "CofO Corrected", "CofO in Progress") ~ "In Progress",
+    InspectionResult %in% c("SGSOV Approved", "SGSOV Not Required", "SGSOV No Gas", "SGSOV Not Required") ~ "SGSOV In Compliance",
+    InspectionResult %in% c("SGSOV Gas Company", "SGSOV Letter Request") ~ "SGSOV In Progress",
+    InspectionResult %in% c("SGSOV Not Ready") ~ "SGSOV Not Compliant",
+    InspectionResult %in% c("Insp Cancelled", "Cancelled", "Off-Hour Fees Due") ~ "Inspection Cancelled",
+    InspectionResult %in% c("Permit Closed", "OK to Expire Permit", "Not Applicable", "Permit Expired", "Permit Withdrawn") ~ "Permit Ended",
+    InspectionResult %in% c("CofO Corrected-Status Void", "CofO Corrected-Status Void", "Permit Expired-Status Void", "Permit Finaled-Status Void", "CofO Issued-Status Void", "Permit Withdrawn-Status Void", "Permit Closed-Status Void") ~ "Voided Inspections")
+  )
+
+#contractor’s place of origin
+length(unique(Q3_Data$ContractorsBusinessName)) # 15179 Contractors
+length(unique(Q3_Data$ContractorCity)) # 718 Cities
+length(unique(Q3_Data$ContractorState)) # Contractors from 40 States
+length(unique(Q3_Data$ApplicantRelationship)) # 13 Types of Relationships
+print(unique(Q3_Data$ApplicantRelationship))
+
+colnames(DataSubset)
+DataSubset[1:5,1:20]
+
+Q3_DataSubset = Q3_Data %>%
+  dplyr::select(c("ContractorsBusinessName", "ContractorCity", "ContractorState", "InspectionResult", "InspectionResultCategory",
+                  "ApplicantRelationship", "PermitSubType", "Valuation"  # Could be an interesting covariates
+                  ))
+
+# We can assume that contractors without a listed City are from Los Angeles, but since Los Angeles is an option, let's assume that this is missing information
+# Next, let's encode the dummy variables
+Q3_DataSubset = Q3_DataSubset %>%
+  dplyr::filter(!(ContractorCity == "")) %>%
+  dplyr::mutate(
+    FromLA = ifelse(ContractorCity == "Los Angeles", 1, 0),
+    FromCA = ifelse(ContractorState == "CA", 1, 0),
+    IsTenant = ifelse(ApplicantRelationship == "Tenant", 1, 0),
+    InspectionPass = ifelse(!(InspectionResultCategory == "Not Compliant"), 1, 0),
+    DirectViolation = ifelse(InspectionResult == "Violation Observed" , 1, 0)
+  )
+
+# Hypothesis: Contractors from outside of LA more likely to have inspection violations
+logRes = glm(DirectViolation ~ FromLA , data = Q3_DataSubset, family = "binomial")
+summary(logRes) # Turns out only non-LA contractors have Direct Violations
+
+# Hypothesis: Contractors from outside of LA more likely to have "Non Compliant" inspections
+logRes = glm(InspectionPass ~ FromLA , data = Q3_DataSubset, family = "binomial")
+summary(logRes) # Too much overlap
+
+logRes = glm(InspectionPass ~ FromCA, data = Q3_DataSubset, family = "binomial")
+summary(logRes) # Beta = -0.37640, P < <2e-16 *
+
+```
+
+So given that contractors outside of LA/CA are more likely to be non-compliant... What factors might influence this?
+1) PermitSubType? Commerical work may be more likely to be non-compliant?
+2) Valulation? More expensive contracts may be more likely to be non-compliant?
+3) ApplicantRelationship? Who applied for the permit, if it was the Owner, tenant, etc?
+
+There's the long-standing debate of whether you need to test whether a particular variable is "significant" before including it into your model, but this can also be considered p-hacking. Best to ask the question with covariates and assume that if you observation is truly robust, then it will still apply.
+
+```{r Q3_Cont}
+
+#Which states are most likely to have non-compliance?
+logRes_CoV = glm(InspectionPass ~ ContractorState + as.factor(PermitSubType) + as.factor(ApplicantRelationship) + Valuation, data = Q3_DataSubset, family = "binomial")
+logRes_CoV_Summary = summary(logRes_CoV)
+
+CoV_P <- logRes_CoV_Summary$coefficients[, 4]  # Extract p-values from model summary
+
+# Apply multiple correction...
+CoV_BH <- p.adjust(CoV_P, method = "BH")
+
+CoV_Results <- data.frame(
+  Predictor = rownames(logRes_CoV_Summary$coefficients),
+  Estimate = logRes_CoV_Summary$coefficients[, 1],  # Coefficient estimates
+  StdError = logRes_CoV_Summary$coefficients[, 2],  # Standard errors
+  PValue = CoV_P,
+  FDR_Adj_PValue = CoV_BH
+)
+
+# Filter for significant values (FDR < 0.05, alpha = 0.1)
+Sig_CoV_Results <- CoV_Results %>%
+  dplyr::filter(FDR_Adj_PValue < 0.05) %>%
+  dplyr::mutate(
+    OR = exp(Estimate), # Odds Ratio
+    PercentChange = as.numeric((OR - 1) * 100) # % Change
+  )
+
+# View results
+print(Sig_CoV_Results)
+
+
+
+```
+
+# Question 3 Answer
+## Interpret your results and produce a clear response for your manager.
+When determining the relationship between a contractor’s place of origin and their inspection outcome history, only contractors from outside of Los Angeles had direct violations. When investigated further, contractors from outside of California were significantly more likely to have inspections resulting in non-compliance.
+
+The contractors from AZ, IL, UT, WA, and WI were significantly more likely to have non-compliant inspections in Los Angeles after controlling for the price of the property, contractors relationship to applicant, and the permit subtype.
+
+Based on these results, contractors from California have a significantly lower risk of having inspection violations than non-Californian contractors.
