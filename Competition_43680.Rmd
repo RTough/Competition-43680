@@ -6,7 +6,7 @@ output:
   html_document:
     df_print: paged
   pdf_document: default
-contact: toughr@myumanitoba.ca
+contact: -
 subtitle: "Leaders in Training Program - Data Science Stream (P3)"
 ---
 
@@ -55,8 +55,8 @@ Regardless of the assignment, it is important to follow a similar process for th
 
 ```{r Data Preprocessing, include=FALSE}
 ##### Loading in the Data #####
-Inspections_20250218 = read.csv("~/Professional/Applications/Provincial/DataIntern/Assessment/Data/Building_and_Safety_Inspections_20250218.csv")
-Permit_Information_20250218 = read.csv("~/Professional/Applications/Provincial/DataIntern/Assessment/Data/Building_and_Safety_Permit_Information_Old_20250218.csv")
+Inspections_20250218 = read.csv("Building_and_Safety_Inspections_20250218.csv")
+Permit_Information_20250218 = read.csv("Building_and_Safety_Permit_Information_Old_20250218.csv")
 
 #Visualize the columns
 colnames(Permit_Information_20250218)
